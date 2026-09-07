@@ -1,0 +1,37 @@
+import { test, expect } from '@playwright/test'
+
+test('installs every production asset and resumes the adventure after an offline reload', async ({ page, context }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('http://127.0.0.1:4174/wildkin-mosslight/')
+  await expect(page.getByText('Ready for offline wandering', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null)
+  await page.getByLabel('And what should we call you?').fill('Offline Scout')
+  await page.getByRole('button', { name: 'Set off with Fernling', exact: true }).click()
+  await page.getByRole('button', { name: 'Move right', exact: true }).click()
+  await expect(page.getByTestId('world')).toHaveAttribute('data-x', '10')
+  await context.setOffline(true)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Mosslight Meadow', exact: true })).toBeVisible()
+  await expect(page.getByTestId('world')).toHaveAttribute('data-x', '10')
+  await page.getByRole('button', { name: 'Explore grass', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('A rustle in the grass.', { timeout: 15_000 })
+  await page.keyboard.press('1')
+  await expect(page.getByRole('dialog')).toContainText('TURN 2')
+  expect(errors).toEqual([])
+})
+
+test('serves an installable manifest, self-hosted fonts, and no external game services', async ({ page }) => {
+  const origins = new Set<string>()
+  page.on('request', request => { if (request.url().startsWith('http')) origins.add(new URL(request.url()).origin) })
+  await page.goto('http://127.0.0.1:4174/wildkin-mosslight/')
+  const manifest = await page.request.get('http://127.0.0.1:4174/wildkin-mosslight/manifest.webmanifest')
+  expect(manifest.ok()).toBe(true)
+  const body = await manifest.json()
+  expect(body.name).toBe('Wildkin: Mosslight')
+  expect(body.start_url).toBe('./')
+  const icon = await page.request.get('http://127.0.0.1:4174/wildkin-mosslight/icon-512.png')
+  expect(icon.headers()['content-type']).toContain('image/png')
+  await page.evaluate(() => document.fonts.ready)
+  expect([...origins]).toEqual(['http://127.0.0.1:4174'])
+})
